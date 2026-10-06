@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="SmartMed.Api/SmartMed.Api.csproj" />
+  <Project Path="SmartMed.Tests/SmartMed.Tests.csproj" />
+</Solution>
