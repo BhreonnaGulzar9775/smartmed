@@ -37,6 +37,7 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Services.AddScoped<JwtService>();
+builder.Services.AddScoped<EmailService>();
 
 builder.Services.AddCors(opt =>
 {
