@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: smartmed-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-smartmed}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smartmed_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-smartmed}
+    ports: ["5432:5432"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks: [smartmed-network]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartmed"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: { context: ./backend, dockerfile: Dockerfile }
+    container_name: smartmed-backend
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Database=${POSTGRES_DB:-smartmed};Username=${POSTGRES_USER:-smartmed};Password=${POSTGRES_PASSWORD:-smartmed_dev_password}
+      - Jwt__Key=${JWT_KEY:-this_is_a_dev_key_change_me_in_production_min32chars}
+      - Jwt__Issuer=${JWT_ISSUER:-SmartMed}
+      - Jwt__Audience=${JWT_AUDIENCE:-SmartMedClient}
+      - SendGrid__ApiKey=${SENDGRID_API_KEY:-}
+      - SendGrid__FromEmail=${SENDGRID_FROM_EMAIL:-noreply@smartmed.local}
+    ports: ["5000:8080"]
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [smartmed-network]
+
+  frontend:
+    build: { context: ./frontend, dockerfile: Dockerfile }
+    container_name: smartmed-frontend
+    ports: ["3000:80"]
+    depends_on: [backend]
+    networks: [smartmed-network]
+
+volumes:
+  postgres_data:
+
+networks:
+  smartmed-network:
+    driver: bridge
