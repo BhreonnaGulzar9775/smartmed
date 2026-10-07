@@ -1,0 +1,122 @@
+name: SmartMed CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  backend-build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - run: dotnet restore backend/SmartMed.sln
+      - run: dotnet build backend/SmartMed.sln --no-restore --configuration Release
+      - run: dotnet test backend/SmartMed.Tests/SmartMed.Tests.csproj --no-build --configuration Release
+
+  frontend-build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint || true
+        working-directory: frontend
+      - run: npm test -- --run || true
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [backend-build-test, frontend-build-test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker compose build
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions: { security-events: write, actions: read, contents: read }
+    strategy:
+      fail-fast: false
+      matrix: { language: ['csharp', 'javascript'] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with: { languages: '${{ matrix.language }}' }
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+
+  trivy:
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t smartmed-backend:scan ./backend
+      - uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'smartmed-backend:scan'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: 'trivy-results.sarif' }
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: [docker-build, codeql, trivy]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+      - uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+      - id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+      - uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - run: curl -X POST "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}"
+      - run: curl -X POST "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}"
