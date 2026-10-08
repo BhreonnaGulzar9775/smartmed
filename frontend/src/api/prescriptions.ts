@@ -18,8 +18,33 @@ export interface Prescription {
     }[]
 }
 
+export const getAllPrescriptions = async () => {
+    const { data } = await api.get<Prescription[]>('/prescriptions')
+    return data
+}
+
+export const getMyPrescriptions = async () => {
+    const { data } = await api.get<Prescription[]>('/prescriptions/me')
+    return data
+}
+
 export const getPrescriptionsByPatient = async (patientId: string) => {
     const { data } = await api.get<Prescription[]>(`/prescriptions/patient/${patientId}`)
+    return data
+}
+
+export const getPrescription = async (id: string) => {
+    const { data } = await api.get<Prescription>(`/prescriptions/${id}`)
+    return data
+}
+
+export const createPrescription = async (payload: {
+    patientId: string
+    branchId: string
+    notes?: string
+    items: { medicineId: string; dosage?: string; quantity: number; instructions?: string }[]
+}) => {
+    const { data } = await api.post('/prescriptions', payload)
     return data
 }
 
